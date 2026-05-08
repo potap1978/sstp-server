@@ -7,7 +7,7 @@
 ## Быстрая установка
 
 ```bash
-curl -s https://raw.githubusercontent.com/potap1978/sstp-server/main/sstp-install.sh | sudo bash
+bash <(wget -qO- https://raw.githubusercontent.com/potap1978/sstp-server/main/sstp-install.sh)
 ```
 
 ## Возможности
