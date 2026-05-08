@@ -4,7 +4,7 @@
 #  SSTP VPN Server Setup for Ubuntu 24.04
 #  Подключение с Windows 11 (встроенный VPN клиент)
 #  Протокол: SSTP (Secure Socket Tunneling Protocol)
-#  v3.3 — ИСПРАВЛЕННЫЙ (пользователи отображаются корректно)
+#  v3.4 — ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ПО НОМЕРУ
 # ============================================================
 
 RED='\033[0;31m'
@@ -29,7 +29,7 @@ PPP_OPTIONS="/etc/ppp/options.sstp"
 print_banner() {
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════════════════╗"
-    echo "║          SSTP VPN Manager v3.3                       ║"
+    echo "║          SSTP VPN Manager v3.4                       ║"
     echo "║          Ubuntu 24.04 → Windows 11                   ║"
     echo "╚══════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -270,7 +270,7 @@ set_external_ip() {
 }
 
 # ============================================================
-# УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (ИСПРАВЛЕННЫЕ ФУНКЦИИ)
+# УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ
 # ============================================================
 
 user_exists() {
@@ -323,6 +323,105 @@ list_users() {
         echo "$users" | while read user; do
             echo "  • $user"
         done
+    fi
+}
+
+# Функция для получения списка пользователей с номерами
+get_users_list() {
+    local users=()
+    local i=1
+    while IFS= read -r line; do
+        if [[ -n "$line" ]] && [[ ! "$line" =~ ^# ]]; then
+            local username=$(echo "$line" | awk '{print $1}' | tr -d '"')
+            if [[ -n "$username" ]]; then
+                users+=("$i|$username|$line")
+                ((i++))
+            fi
+        fi
+    done < "$CHAP_SECRETS"
+    printf '%s\n' "${users[@]}"
+}
+
+# Функция для отображения данных выбранного пользователя
+show_user_connection_info() {
+    local username="$1"
+    local password="$2"
+    local ext_ip="$3"
+    
+    echo ""
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════╗"
+    echo -e "║       ДАННЫЕ ДЛЯ ПОДКЛЮЧЕНИЯ (Windows 11)            ║"
+    echo -e "╚══════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Пользователь:${NC}      $username"
+    echo -e "  ${YELLOW}Пароль:${NC}            $password"
+    echo -e "  ${YELLOW}Адрес сервера:${NC}     $ext_ip"
+    echo -e "  ${YELLOW}Тип VPN:${NC}           SSTP"
+    echo -e "  ${YELLOW}Порт:${NC}              443 (HTTPS)"
+    echo -e "  ${YELLOW}Сертификат CA:${NC}     $CERT_DIR/ca.crt"
+    echo ""
+    echo -e "${GREEN}Инструкция по установке сертификата:${NC}"
+    echo "  1. Скачай сертификат через пункт 6 меню"
+    echo "  2. Установи его в «Доверенные корневые центры сертификации»"
+    echo "  3. Создай VPN подключение с этими данными"
+    echo ""
+}
+
+print_connection_info() {
+    local ext_ip=$(get_external_ip)
+    
+    # Получаем список пользователей
+    local users_list=()
+    while IFS= read -r line; do
+        if [[ -n "$line" ]] && [[ ! "$line" =~ ^# ]]; then
+            local username=$(echo "$line" | awk '{print $1}' | tr -d '"')
+            if [[ -n "$username" ]]; then
+                users_list+=("$username|$line")
+            fi
+        fi
+    done < "$CHAP_SECRETS"
+    
+    if [[ ${#users_list[@]} -eq 0 ]]; then
+        echo ""
+        print_warn "Нет зарегистрированных пользователей!"
+        echo ""
+        print_info "Сначала добавьте пользователя (пункт 1)"
+        return
+    fi
+    
+    # Показываем список пользователей с номерами
+    echo ""
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════╗"
+    echo -e "║       ВЫБЕРИТЕ ПОЛЬЗОВАТЕЛЯ                               ║"
+    echo -e "╚══════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    local i=1
+    for entry in "${users_list[@]}"; do
+        local username=$(echo "$entry" | cut -d'|' -f1)
+        echo -e "  ${GREEN}$i)${NC} $username"
+        ((i++))
+    done
+    echo ""
+    echo -e "  ${RED}0)${NC} Назад"
+    echo ""
+    
+    read -rp "  Выберите пользователя [0-${#users_list[@]}]: " user_choice
+    
+    if [[ "$user_choice" == "0" ]] || [[ -z "$user_choice" ]]; then
+        return
+    fi
+    
+    if [[ "$user_choice" =~ ^[0-9]+$ ]] && [[ "$user_choice" -ge 1 ]] && [[ "$user_choice" -le ${#users_list[@]} ]]; then
+        local selected="${users_list[$((user_choice-1))]}"
+        local username=$(echo "$selected" | cut -d'|' -f1)
+        local full_line=$(echo "$selected" | cut -d'|' -f2-)
+        # Извлекаем пароль из строки (третий элемент в кавычках)
+        local password=$(echo "$full_line" | awk '{print $3}' | tr -d '"')
+        
+        show_user_connection_info "$username" "$password" "$ext_ip"
+    else
+        print_err "Неверный выбор!"
     fi
 }
 
@@ -515,30 +614,6 @@ regenerate_certificate() {
 }
 
 # ============================================================
-# ДАННЫЕ ПОДКЛЮЧЕНИЯ
-# ============================================================
-
-print_connection_info() {
-    source "$CONFIG_FILE" 2>/dev/null
-    local EXT_IP
-    EXT_IP=$(get_external_ip)
-
-    echo ""
-    echo -e "${CYAN}╔══════════════════════════════════════════════════════╗"
-    echo -e "║       ДАННЫЕ ДЛЯ ПОДКЛЮЧЕНИЯ (Windows 11)            ║"
-    echo -e "╚══════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "  ${YELLOW}Адрес сервера:${NC}  $EXT_IP"
-    echo -e "  ${YELLOW}Тип VPN:${NC}        SSTP"
-    echo -e "  ${YELLOW}Порт:${NC}           443 (HTTPS)"
-    echo -e "  ${YELLOW}Сертификат CA:${NC}  $CERT_DIR/ca.crt"
-    echo ""
-    list_users
-    echo ""
-    echo -e "${YELLOW}Если сервер за NAT — используй внешний IP провайдера!${NC}"
-}
-
-# ============================================================
 # HELP — КАК ПОДКЛЮЧИТЬСЯ С WINDOWS 11
 # ============================================================
 
@@ -557,58 +632,28 @@ show_help() {
     echo -e "${YELLOW}━━━ ШАГ 1 — Получить сертификат CA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     print_step "В главном меню выбери пункт 6 — «Одноразовая ссылка для сертификата»"
-    print_step "Скопируй ссылку и открой её в браузере на Windows (Edge / Chrome / Firefox)"
+    print_step "Скопируй ссылку и открой её в браузере на Windows"
     print_step "Файл ${GREEN}sstp_ca.crt${NC} скачается автоматически"
     echo ""
 
     echo -e "${YELLOW}━━━ ШАГ 2 — Установить сертификат на Windows ━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    print_step "Найди скачанный файл ${GREEN}sstp_ca.crt${NC} (обычно в папке Загрузки)"
-    print_step "Сделай двойной клик по файлу"
-    print_step "Нажми кнопку ${CYAN}«Установить сертификат»${NC}"
-    print_step "Расположение хранилища → выбери ${CYAN}«Локальный компьютер»${NC} → Далее"
+    print_step "Двойной клик по файлу ${GREEN}sstp_ca.crt${NC}"
+    print_step "Нажми ${CYAN}«Установить сертификат»${NC}"
+    print_step "Выбери ${CYAN}«Локальный компьютер»${NC} → Далее"
     print_step "Выбери ${CYAN}«Поместить все сертификаты в следующее хранилище»${NC}"
-    print_step "Нажми ${CYAN}«Обзор»${NC} и выбери ${CYAN}«Доверенные корневые центры сертификации»${NC}"
-    print_step "Нажми ОК → Далее → Готово"
-    print_step "Появится предупреждение — нажми ${CYAN}«Да»${NC} для подтверждения"
+    print_step "Нажми ${CYAN}«Обзор»${NC} → выбери ${CYAN}«Доверенные корневые центры сертификации»${NC}"
+    print_step "ОК → Далее → Готово"
     echo ""
 
     echo -e "${YELLOW}━━━ ШАГ 3 — Создать VPN подключение ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    print_step "Нажми ${CYAN}Win + I${NC} — откроются Параметры Windows"
-    print_step "Перейди: ${CYAN}Сеть и Интернет → VPN${NC}"
-    print_step "Нажми кнопку ${CYAN}«Добавить VPN»${NC}"
+    print_step "Параметры → Сеть и Интернет → VPN → Добавить VPN"
     echo ""
-    echo -e "    Заполни поля:"
-    echo ""
-    echo -e "    ${CYAN}Поставщик VPN:${NC}              Windows (встроенный)"
-    echo -e "    ${CYAN}Имя подключения:${NC}            SSTP VPN  (или любое название)"
-    echo -e "    ${CYAN}Имя или адрес сервера:${NC}      ${GREEN}$EXT_IP${NC}"
-    echo -e "    ${CYAN}Тип VPN:${NC}                    ${GREEN}Протокол SSTP${NC}"
-    echo -e "    ${CYAN}Тип данных для входа:${NC}       Имя пользователя и пароль"
-    echo -e "    ${CYAN}Имя пользователя:${NC}           (логин созданного пользователя)"
-    echo -e "    ${CYAN}Пароль:${NC}                     (пароль созданного пользователя)"
-    echo ""
-    print_step "Нажми ${CYAN}«Сохранить»${NC}"
-    echo ""
-
-    echo -e "${YELLOW}━━━ ШАГ 4 — Подключиться ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    print_step "Перейди: ${CYAN}Параметры → Сеть и Интернет → VPN${NC}"
-    print_step "Нажми на своё подключение → ${CYAN}«Подключить»${NC}"
-    echo ""
-
-    echo -e "${YELLOW}━━━ Решение распространённых ошибок ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  ${RED}Ошибка 0x80092013${NC}"
-    echo "    Сертификат не установлен или установлен в неверное хранилище."
-    echo ""
-    echo -e "  ${RED}Ошибка 691${NC}"
-    echo "    Неверный логин или пароль."
-    echo ""
-    echo -e "  ${RED}Ошибка 789${NC}"
-    echo "    Проблема согласования протокола. Убедись что выбрал именно"
-    echo "    тип VPN «Протокол SSTP», а не «Автоматически»."
+    echo "    Поставщик VPN:    Windows (встроенный)"
+    echo "    Тип VPN:          Протокол SSTP"
+    echo "    Адрес сервера:    (внешний IP вашего сервера)"
+    echo "    Логин/пароль:     (данные выбранного пользователя)"
     echo ""
 }
 
@@ -672,7 +717,7 @@ menu_change_external_ip() {
             ;;
         2)
             echo ""
-            read -rp "  Введите внешний IP (например 1.2.3.4): " MANUAL_IP
+            read -rp "  Введите внешний IP: " MANUAL_IP
             if [[ -z "$MANUAL_IP" ]]; then
                 print_err "IP не может быть пустым."
                 return
@@ -698,7 +743,7 @@ menu_change_external_ip() {
             ;;
     esac
     echo ""
-    print_info "Новый внешний IP будет использоваться в данных подключения и HELP."
+    print_info "Новый внешний IP будет использоваться в данных подключения."
 }
 
 show_menu() {
@@ -717,7 +762,7 @@ show_menu() {
         echo -e "  ${CYAN} 2)${NC}  Удалить пользователя"
         echo -e "  ${CYAN} 3)${NC}  Сменить пароль пользователя"
         echo -e "  ${CYAN} 4)${NC}  Список пользователей"
-        echo -e "  ${CYAN} 5)${NC}  Показать данные подключения"
+        echo -e "  ${CYAN} 5)${NC}  Показать данные подключения для пользователя"
         echo -e "  ${CYAN} 6)${NC}  Одноразовая ссылка для сертификата"
         echo -e "  ${CYAN} 7)${NC}  Пересоздать сертификат"
         echo -e "  ${CYAN} 8)${NC}  Перезапустить сервис VPN"
@@ -850,8 +895,7 @@ first_install() {
     restart_services
 
     print_ok "Установка завершена!"
-    print_connection_info
-
+    
     echo ""
     read -rp "  Сгенерировать одноразовую ссылку для сертификата прямо сейчас? (y/N): " GEN
     [[ "$GEN" =~ ^[Yy]$ ]] && generate_onetime_link
