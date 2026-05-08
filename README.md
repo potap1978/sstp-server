@@ -4,8 +4,10 @@
 
 ## Быстрая установка
 
+## Быстрая установка
+
 ```bash
-sudo bash <(curl -s https://raw.githubusercontent.com/potap1978/sstp-server/main/sstp-install.sh)
+curl -s https://raw.githubusercontent.com/potap1978/sstp-server/main/sstp-install.sh | sudo bash
 ```
 
 ## Возможности
